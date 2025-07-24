@@ -1,0 +1,57 @@
+{
+  "name": "admin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .ts,.tsx,.vue,.js,.jsx",
+    "format": "prettier --write '**/*.{ts,tsx,js,jsx,json,vue,md,yml,yaml}'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "prepare": "husky install",
+    "check": "npm run lint && npm run type-check && npm run test"
+  },
+  "dependencies": {
+    "@apollo/client": "^3.13.8",
+    "chart.js": "^4.4.0",
+    "graphql": "^16.11.0",
+    "i18next": "^25.3.2",
+    "pinia": "^2.1.7",
+    "tailwindcss": "^4.1.11",
+    "vue": "^3.4.21",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.10",
+    "@tailwindcss/typography": "^0.5.16",
+    "@testing-library/vue": "^6.2.0",
+    "@types/node": "^20.11.19",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "@vue/test-utils": "^2.4.3",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.31.0",
+    "eslint-plugin-vue": "^9.20.0",
+    "husky": "^9.1.7",
+    "jsdom": "^24.0.0",
+    "lint-staged": "^16.1.2",
+    "postcss": "^8.5.6",
+    "prettier": "^3.6.2",
+    "prettier-plugin-tailwindcss": "^0.6.14",
+    "typescript": "^5.8.3",
+    "vite": "^5.2.10",
+    "vite-plugin-eslint": "^1.8.1",
+    "vitest": "^3.2.4"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,vue}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

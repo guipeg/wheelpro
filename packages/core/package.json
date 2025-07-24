@@ -1,0 +1,40 @@
+{
+  "name": "@wheelpro/core",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "vitest watch",
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "format": "prettier --write '**/*.{ts,tsx,json,md,yml,yaml}'",
+    "test": "vitest run",
+    "prepare": "husky install",
+    "check": "npm run lint && npm run type-check && npm run test"
+  },
+  "dependencies": {
+    "zod": "^4.0.7",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "@types/node": "^20.11.19",
+    "eslint": "^9.31.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-tailwindcss": "^0.6.14",
+    "vitest": "^3.2.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.2"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

@@ -1,19 +1,3 @@
-// schema.prisma - Modelagem completa e definitiva do banco de dados em Prisma para PostgreSQL.
-// Esta modelagem incorpora todas as entidades, relacionamentos, tipos, constraints, índices e estruturas auxiliares.
-// Validações são implementadas via CHECK constraints e funções custom (ex.: para soma de probabilidades = 100).
-// Versionamento em margin_configs via coluna 'version' com UNIQUE constraint por influencer/version.
-// Auditoria via trigger function que insere em audit_logs automaticamente em INSERT/UPDATE em tabelas sensíveis (spins, transactions, packages, redeems).
-// Controle de margem via materialized view 'margin_reports' com refresh para RTP/margem calculados, e constraints em margin_configs para thresholds.
-// Normalização: 3NF para evitar redundância (ex.: guarantees como JSONB para flexibilidade sem tabelas N:M excessivas, mas com GIN index para queries eficientes).
-// Desnormalização estratégica: probabilities_used em spins como JSONB para logs rápidos sem joins.
-// Índices: Compostos para queries frequentes (ex.: user_id + timestamp para histories/leaderboards), GIN para JSONB, particionamento em spins/audit_logs por timestamp para escalabilidade em alto volume.
-// Regras de negócio embutidas: CHECK para age >=18, probs sum=100 via function, stock >=0, etc.
-// Entidades cobrem: Usuários/influenciadores, pacotes/códigos, spins/pontos, produtos/resgates, cupons/horários, campaigns/streaks/badges/leaderboards/referrals, audit/margin.
-// Relacionamentos com cardinalidades: 1:N (ex.: users 1:N spins), N:1 (ex.: spins N:1 horario_slots), 1:1 (ex.: influencers 1:1 users).
-// Segurança: RLS policies para row-level access (ex.: influenciadores veem apenas seus data via WHERE influencer_id = session_user_id).
-// Funções e triggers para automação: Ex.: log_audit() trigger, check_probs_sum() function.
-// Views materializadas para relatórios/engajamento, refresh via cron (mas cron é externo ao DB).
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -23,7 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Enums para tipos restritos (regras de negócio: roles limitados, statuses controlados para integridade).
+// Enums
 enum Role {
   USER
   INFLUENCER
@@ -74,11 +58,11 @@ enum Period {
   MONTHLY
 }
 
-// Entidade principal: Usuários (inclui influenciadores via role; relacionamentos 1:N com maioria das tabelas para rastreamento por user).
+// Models
 model users {
   id               String            @id @default(uuid()) @db.Uuid
   email            String            @unique @db.VarChar(255)
-  password_hash    String            @db.VarChar(255) // Encrypted via pgcrypto if needed.
+  password_hash    String            @db.VarChar(255)
   name             String            @db.VarChar(100)
   role             Role              @default(USER)
   points_balance   Decimal           @default(0.00) @db.Decimal(10, 2)
@@ -88,376 +72,284 @@ model users {
   updated_at       DateTime          @updatedAt
   deleted_at       DateTime?
 
-  influencers      influencers?
-  transactions     transactions[]
-  spins            spins[]
-  points_histories points_histories[]
-  redeems          redeems[]
-  coupons          coupons[]
-  streaks          streaks[]
-  badges           badges[]
-  leaderboards     leaderboards[]
-  referrals_referrer referrals[] @relation("referrer")
-  referrals_referred referrals[] @relation("referred")
-  audit_logs       audit_logs[]
+  influencers          influencers?
+  transactions         transactions[]
+  spins                spins[]
+  points_histories     points_histories[]
+  redeems              redeems[]
+  coupons              coupons[]
+  streaks              streaks[]
+  badges               badges[]
+  leaderboards         leaderboards[]
+  referrals_referrer   referrals[] @relation("referrer")
+  referrals_referred   referrals[] @relation("referred")
+  audit_logs           audit_logs[]
 
   @@index([role])
   @@index([referral_code])
-  @@constraint(check (EXTRACT(YEAR FROM age(now(), birthdate)) >= 18)) // Regra de negócio: min age 18.
 }
 
-// Extensão 1:1 para influenciadores (relacionamentos N:1 com customizáveis como packages/horario_slots).
 model influencers {
-  user_id          String            @id @db.Uuid
-  bio              String?           @db.Text
-  social_links     Json?             // JSONB para flexibilidade (ex.: {"tiktok": "url"}); index GIN para queries.
-  follower_count   Int?
-  commission_rate  Decimal           @default(0.10) @db.Decimal(5, 2) // Regra de negócio: comissão padrão.
+  user_id         String        @id @db.Uuid
+  bio             String?       @db.Text
+  social_links    Json?
+  follower_count  Int?
+  commission_rate Decimal        @default(0.10) @db.Decimal(5, 2)
 
-  user             users             @relation(fields: [user_id], references: [id])
-  packages         packages[]
-  horario_slots    horario_slots[]
-  campaigns        campaigns[]
-  margin_configs   margin_configs[]
+  user            users          @relation(fields: [user_id], references: [id])
+  packages        packages[]
+  horario_slots   horario_slots[]
+  campaigns       campaigns[]
+  margin_configs  margin_configs[]
+  products        products[]
 
   @@index([user_id])
 }
 
-// Pacotes (configs dinâmicas em JSONB com GIN index; constraints para preços/qtds; relacionamentos 1:N com transactions/codes).
 model packages {
-  id                String            @id @default(uuid()) @db.Uuid
-  name              String            @db.VarChar(100)
-  original_price    Decimal           @db.Decimal(10, 2)
-  promo_price       Decimal           @db.Decimal(10, 2)
-  main_codes_qty    Int
-  extra_codes_qty   Int
-  guarantees        Json?             // JSONB ex.: {"min_500": 3}; GIN para search.
-  weights_main      Json?             // JSONB array probs; validated by function.
-  weights_extra     Json?             // JSONB array; lower probs for extras.
-  influencer_id     String?           @db.Uuid
-  created_at        DateTime          @default(now())
-  updated_at        DateTime          @updatedAt
+  id              String         @id @default(uuid()) @db.Uuid
+  name            String         @db.VarChar(100)
+  original_price  Decimal        @db.Decimal(10, 2)
+  promo_price     Decimal        @db.Decimal(10, 2)
+  main_codes_qty  Int
+  extra_codes_qty Int
+  guarantees      Json?
+  weights_main    Json?
+  weights_extra   Json?
+  influencer_id   String?        @db.Uuid
+  created_at      DateTime       @default(now())
+  updated_at      DateTime       @updatedAt
 
-  influencer        influencers?      @relation(fields: [influencer_id], references: [user_id])
-  transactions      transactions[]
-  coupons           coupons[]
-  campaigns         campaigns[]
+  influencer      influencers?   @relation(fields: [influencer_id], references: [user_id])
+  transactions    transactions[]
+  coupons         coupons[]
+  campaigns       campaigns[]
 
   @@index([influencer_id])
-  @@index(guarantees) @type(gin)
-  @@index(weights_main) @type(gin)
-  @@index(weights_extra) @type(gin)
-  @@constraint(check (promo_price <= original_price))
-  @@constraint(check (main_codes_qty >= 0))
-  @@constraint(check (extra_codes_qty >= 0))
-  @@constraint(check (check_probs_sum(weights_main::jsonb))) // Function custom para sum=100.
-  @@constraint(check (check_probs_sum(weights_extra::jsonb)))
 }
 
-// Função Postgres para validar soma de probs (chamada em constraints).
-CREATE OR REPLACE FUNCTION check_probs_sum(probs jsonb) RETURNS boolean AS $$
-SELECT SUM(value::numeric) = 100 FROM jsonb_array_elements(probs);
-$$ LANGUAGE sql IMMUTABLE;
-
-// Transações (relacionamentos N:1 com users/packages; 1:N com codes; constraints para status).
 model transactions {
-  id                String            @id @default(uuid()) @db.Uuid
-  user_id           String            @db.Uuid
-  package_id        String            @db.Uuid
-  amount_paid       Decimal           @db.Decimal(10, 2)
+  id                String         @id @default(uuid()) @db.Uuid
+  user_id           String         @db.Uuid
+  package_id        String         @db.Uuid
+  amount_paid       Decimal        @db.Decimal(10, 2)
   status            TransactionStatus
-  payment_provider  String            @db.VarChar(50)
-  transaction_ref   String            @unique @db.VarChar(100)
+  payment_provider  String         @db.VarChar(50)
+  transaction_ref   String         @unique @db.VarChar(100)
   codes_generated   Int
-  coupon_id         String?           @db.Uuid
-  timestamp         DateTime          @default(now())
+  coupon_id         String?        @db.Uuid
+  timestamp         DateTime       @default(now())
 
-  user              users             @relation(fields: [user_id], references: [id])
-  package           packages          @relation(fields: [package_id], references: [id])
-  coupon            coupons?          @relation(fields: [coupon_id], references: [id])
+  user              users          @relation(fields: [user_id], references: [id])
+  package           packages       @relation(fields: [package_id], references: [id])
+  coupon            coupons?       @relation(fields: [coupon_id], references: [id])
   codes             codes[]
 
   @@index([user_id, timestamp])
   @@index([status])
 }
 
-// Códigos (relacionamentos N:1 com transactions; 1:1 com spins; constraints para uso único).
 model codes {
-  id                String            @id @default(uuid()) @db.Uuid
-  transaction_id    String            @db.Uuid
-  code_value        String            @unique @db.VarChar(20)
-  type              CodeType
-  weight_override   Decimal?          @db.Decimal(5, 2)
-  is_used           Boolean           @default(false)
-  spin_id           String?           @db.Uuid @unique
-  created_at        DateTime          @default(now())
+  id              String     @id @default(uuid()) @db.Uuid
+  transaction_id  String     @db.Uuid
+  code_value      String     @unique @db.VarChar(20)
+  type            CodeType
+  weight_override Decimal?   @db.Decimal(5, 2)
+  is_used         Boolean    @default(false)
+  spin_id         String?    @db.Uuid @unique
+  created_at      DateTime   @default(now())
 
-  transaction       transactions      @relation(fields: [transaction_id], references: [id])
-  spin              spins?            @relation(fields: [spin_id], references: [id])
+  transaction     transactions  @relation(fields: [transaction_id], references: [id])
+  spin            spins?        // sem @relation: definido no lado "spins"
 
   @@index([transaction_id])
   @@index([is_used])
 }
 
-// Spins (relacionamentos N:1 com users/codes/horario_slots; JSONB para probs usadas; particionamento para escala).
 model spins {
-  id                  String            @id @default(uuid()) @db.Uuid
-  user_id             String            @db.Uuid
-  code_id             String            @db.Uuid @unique
-  points_awarded      Decimal           @db.Decimal(10, 2)
-  seed                String            @db.VarChar(64)
-  probabilities_used  Json              // JSONB array; GIN para auditoria queries.
-  horario_slot_id     String?           @db.Uuid
-  timestamp           DateTime          @default(now())
+  id                  String         @id @default(uuid()) @db.Uuid
+  user_id             String         @db.Uuid
+  code_id             String         @db.Uuid @unique
+  points_awarded      Decimal        @db.Decimal(10, 2)
+  seed                String         @db.VarChar(64)
+  probabilities_used  Json
+  horario_slot_id     String?        @db.Uuid
+  timestamp           DateTime       @default(now())
 
-  user                users             @relation(fields: [user_id], references: [id])
-  code                codes             @relation(fields: [code_id], references: [id])
-  horario_slot        horario_slots?    @relation(fields: [horario_slot_id], references: [id])
+  user                users          @relation(fields: [user_id], references: [id])
+  code                codes          @relation(fields: [code_id], references: [id])
+  horario_slot        horario_slots? @relation(fields: [horario_slot_id], references: [id])
   points_histories    points_histories[]
-
-  @@index([user_id, timestamp]) @@partition(range: timestamp)
-  @@index(probabilities_used) @type(gin)
 }
 
-// Histórico de pontos (relacionamentos N:1 com users/spins; para rastreamento e relatórios de margem).
 model points_histories {
-  id               String            @id @default(uuid()) @db.Uuid
-  user_id          String            @db.Uuid
-  change_amount    Decimal           @db.Decimal(10, 2)
-  reason           PointReason
-  reference_id     String?           @db.Uuid
-  timestamp        DateTime          @default(now())
+  id             String     @id @default(uuid()) @db.Uuid
+  user_id        String     @db.Uuid
+  change_amount  Decimal    @db.Decimal(10, 2)
+  reason         PointReason
+  reference_id   String?    @db.Uuid
+  timestamp      DateTime   @default(now())
 
-  user             users             @relation(fields: [user_id], references: [id])
-  spin             spins?            @relation(fields: [reference_id], references: [id]) // Polymorphic para spin/redeem.
+  user           users      @relation(fields: [user_id], references: [id])
+  spin           spins?     @relation(fields: [reference_id], references: [id])
 
   @@index([user_id, timestamp])
   @@index([reason])
 }
-
-// Produtos (relacionamentos 1:N com redeems; constraints para stock; real_cost para margem).
 model products {
-  id                 String            @id @default(uuid()) @db.Uuid
-  name               String            @db.VarChar(100)
-  description        String?           @db.Text
-  points_required    Decimal           @db.Decimal(10, 2)
-  real_cost          Decimal           @db.Decimal(10, 2)
-  stock              Int               @default(0)
-  influencer_id      String?           @db.Uuid
-  created_at         DateTime          @default(now())
-  updated_at         DateTime          @updatedAt
+  id               String     @id @default(uuid()) @db.Uuid
+  name             String     @db.VarChar(100)
+  description      String?    @db.Text
+  points_required  Decimal    @db.Decimal(10, 2)
+  real_cost        Decimal    @db.Decimal(10, 2)
+  stock            Int        @default(0)
+  influencer_id    String?    @db.Uuid
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @updatedAt
 
-  influencer         influencers?      @relation(fields: [influencer_id], references: [user_id])
-  redeems            redeems[]
+  influencer       influencers? @relation(fields: [influencer_id], references: [user_id])
+  redeems          redeems[]
 
   @@index([points_required])
   @@index([influencer_id])
-  @@constraint(check (stock >= 0))
 }
 
-// Resgates (relacionamentos N:1 com users/products; para rastreamento de margem via points_used vs real_cost).
 model redeems {
-  id               String            @id @default(uuid()) @db.Uuid
-  user_id          String            @db.Uuid
-  product_id       String            @db.Uuid
-  points_used      Decimal           @db.Decimal(10, 2)
-  status           RedeemStatus
-  timestamp        DateTime          @default(now())
+  id            String     @id @default(uuid()) @db.Uuid
+  user_id       String     @db.Uuid
+  product_id    String     @db.Uuid
+  points_used   Decimal    @db.Decimal(10, 2)
+  status        RedeemStatus
+  timestamp     DateTime   @default(now())
 
-  user             users             @relation(fields: [user_id], references: [id])
-  product          products          @relation(fields: [product_id], references: [id])
+  user          users      @relation(fields: [user_id], references: [id])
+  product       products   @relation(fields: [product_id], references: [id])
 
   @@index([user_id, timestamp])
   @@index([status])
 }
 
-// Cupons (relacionamentos N:1 com users/packages; constraints para % e expiração).
 model coupons {
-  id                 String            @id @default(uuid()) @db.Uuid
-  code               String            @unique @db.VarChar(20)
-  discount_percent   Decimal           @db.Decimal(5, 2)
-  expire_date        DateTime          @db.Date
-  user_id            String?           @db.Uuid
-  package_id         String?           @db.Uuid
-  is_used            Boolean           @default(false)
-  created_at         DateTime          @default(now())
+  id                String     @id @default(uuid()) @db.Uuid
+  code              String     @unique @db.VarChar(20)
+  discount_percent  Decimal    @db.Decimal(5, 2)
+  expire_date       DateTime   @db.Date
+  user_id           String?    @db.Uuid
+  package_id        String?    @db.Uuid
+  is_used           Boolean    @default(false)
+  created_at        DateTime   @default(now())
 
-  user               users?            @relation(fields: [user_id], references: [id])
-  package            packages?         @relation(fields: [package_id], references: [id])
-  transactions       transactions[]
+  user              users?     @relation(fields: [user_id], references: [id])
+  package           packages?  @relation(fields: [package_id], references: [id])
+  transactions      transactions[]
 
   @@index([expire_date])
   @@index([user_id])
-  @@constraint(check (discount_percent BETWEEN 0 AND 100))
 }
 
-// Horários bonificados (relacionamentos 1:N com spins; constraints para time ranges).
 model horario_slots {
-  id                 String            @id @default(uuid()) @db.Uuid
-  start_time         DateTime          @db.Time
-  end_time           DateTime          @db.Time
-  boost_multiplier   Decimal           @default(1.00) @db.Decimal(3, 2)
-  is_active          Boolean           @default(true)
-  influencer_id      String?           @db.Uuid
+  id                 String     @id @default(uuid()) @db.Uuid
+  start_time         DateTime   @db.Time
+  end_time           DateTime   @db.Time
+  boost_multiplier   Decimal    @default(1.00) @db.Decimal(3, 2)
+  is_active          Boolean    @default(true)
+  influencer_id      String?    @db.Uuid
 
-  influencer         influencers?      @relation(fields: [influencer_id], references: [user_id])
+  influencer         influencers? @relation(fields: [influencer_id], references: [user_id])
   spins              spins[]
 
   @@index([start_time, end_time])
   @@index([is_active])
-  @@constraint(check (end_time > start_time))
-  @@constraint(check (boost_multiplier >= 1.0))
 }
 
-// Campanhas (relacionamentos N:1 com influencers; 1:N com packages para agrupamento).
 model campaigns {
-  id                 String            @id @default(uuid()) @db.Uuid
-  influencer_id      String            @db.Uuid
-  name               String            @db.VarChar(100)
-  start_date         DateTime          @db.Date
-  end_date           DateTime?         @db.Date
+  id                 String     @id @default(uuid()) @db.Uuid
+  influencer_id      String     @db.Uuid
+  name               String     @db.VarChar(100)
+  start_date         DateTime   @db.Date
+  end_date           DateTime?  @db.Date
   target_followers   Int?
-  conversion_rate    Decimal?          @db.Decimal(5, 2)
-  created_at         DateTime          @default(now())
+  conversion_rate    Decimal?   @db.Decimal(5, 2)
+  created_at         DateTime   @default(now())
 
-  influencer         influencers       @relation(fields: [influencer_id], references: [user_id])
+  influencer         influencers @relation(fields: [influencer_id], references: [user_id])
   packages           packages[]
 
   @@index([influencer_id, start_date])
 }
 
-// Streaks (relacionamentos N:1 com users; para gamificação de engajamento diário).
 model streaks {
-  id                   String            @id @default(uuid()) @db.Uuid
-  user_id              String            @db.Uuid @unique
-  streak_count         Int               @default(0)
-  last_activity_date   DateTime          @db.Date
-  bonus_awarded        Boolean           @default(false)
+  id                   String   @id @default(uuid()) @db.Uuid
+  user_id              String   @unique @db.Uuid
+  streak_count         Int      @default(0)
+  last_activity_date   DateTime @db.Date
+  bonus_awarded        Boolean  @default(false)
 
-  user                 users             @relation(fields: [user_id], references: [id])
+  user                 users    @relation(fields: [user_id], references: [id])
 
   @@index([user_id, last_activity_date])
 }
 
-// Badges (relacionamentos N:1 com users; para recompensas gamificadas).
 model badges {
-  id               String            @id @default(uuid()) @db.Uuid
-  user_id          String            @db.Uuid
+  id               String   @id @default(uuid()) @db.Uuid
+  user_id          String   @db.Uuid
   badge_type       BadgeType
-  awarded_at       DateTime          @default(now())
+  awarded_at       DateTime @default(now())
 
-  user             users             @relation(fields: [user_id], references: [id])
+  user             users    @relation(fields: [user_id], references: [id])
 
   @@index([user_id, badge_type])
 }
-
-// Auditoria (relacionamentos N:1 com users; JSONB para details flexíveis; particionamento para logs de alto volume).
 model audit_logs {
-  id               String            @id @default(uuid()) @db.Uuid
-  action_type      ActionType
-  user_id          String?           @db.Uuid
-  details          Json              // JSONB ex.: {"before": {}, "after": {}}; GIN para search.
-  timestamp        DateTime          @default(now())
+  id           String     @id @default(uuid()) @db.Uuid
+  action_type  ActionType
+  user_id      String?    @db.Uuid
+  details      Json
+  timestamp    DateTime   @default(now())
 
-  user             users?            @relation(fields: [user_id], references: [id])
+  user         users?     @relation(fields: [user_id], references: [id])
 
-  @@index([action_type, timestamp]) @@partition(range: timestamp)
-  @@index(details) @type(gin)
+  @@index([action_type, timestamp])
 }
 
-// Configs de margem (relacionamentos N:1 com influencers; version para histórico de mudanças).
 model margin_configs {
-  id                   String            @id @default(uuid()) @db.Uuid
-  rtp_target           Decimal           @default(70.00) @db.Decimal(5, 2)
-  margin_threshold     Decimal           @default(30.00) @db.Decimal(5, 2)
-  auto_adjust_probs    Boolean           @default(true)
-  influencer_id        String?           @db.Uuid
-  version              Int
-  created_at           DateTime          @default(now())
+  id                  String   @id @default(uuid()) @db.Uuid
+  rtp_target          Decimal  @default(70.00) @db.Decimal(5, 2)
+  margin_threshold    Decimal  @default(30.00) @db.Decimal(5, 2)
+  auto_adjust_probs   Boolean  @default(true)
+  influencer_id       String?  @db.Uuid
+  version             Int
+  created_at          DateTime @default(now())
 
-  influencer           influencers?      @relation(fields: [influencer_id], references: [user_id])
+  influencer          influencers? @relation(fields: [influencer_id], references: [user_id])
 
-  @@unique([influencer_id, version]) // Versionamento por influencer.
+  @@unique([influencer_id, version])
   @@index([influencer_id, version])
 }
 
-// Leaderboards (relacionamentos N:1 com users; rank computado via view para performance).
 model leaderboards {
-  id               String            @id @default(uuid()) @db.Uuid
-  user_id          String            @db.Uuid
-  score            Decimal           @db.Decimal(10, 2)
-  period           Period
-  rank             Int?
+  id       String   @id @default(uuid()) @db.Uuid
+  user_id  String   @db.Uuid
+  score    Decimal  @db.Decimal(10, 2)
+  period   Period
+  rank     Int?
 
-  user             users             @relation(fields: [user_id], references: [id])
+  user     users    @relation(fields: [user_id], references: [id])
 
-  @@index([period, score DESC])
+  @@index([period])
+  @@index([user_id])
 }
 
-// Referrals (relacionamentos N:1 com users para referrer/referred; unique para evitar duplicatas).
 model referrals {
-  id                String            @id @default(uuid()) @db.Uuid
-  referrer_id       String            @db.Uuid
-  referred_id       String            @db.Uuid
-  bonus_awarded     Decimal           @db.Decimal(10, 2)
-  timestamp         DateTime          @default(now())
+  id             String   @id @default(uuid()) @db.Uuid
+  referrer_id    String   @db.Uuid
+  referred_id    String   @db.Uuid
+  bonus_awarded  Decimal  @db.Decimal(10, 2)
+  timestamp      DateTime @default(now())
 
-  referrer          users             @relation("referrer", fields: [referrer_id], references: [id])
-  referred          users             @relation("referred", fields: [referred_id], references: [id])
+  referrer       users    @relation("referrer", fields: [referrer_id], references: [id])
+  referred       users    @relation("referred", fields: [referred_id], references: [id])
 
   @@unique([referrer_id, referred_id])
   @@index([referrer_id])
 }
-
-// Views Materializadas (para CQRS: reads agregados rápidos em dashboards/relatórios; refresh via cron externo).
-view user_metrics {
-  user_id          String
-  total_points     Decimal
-  total_spins      Int
-  total_redeems    Int
-  // SELECT user_id, SUM(change_amount) AS total_points, COUNT(*) FILTER (WHERE reason = 'SPIN') AS total_spins, ... FROM points_histories GROUP BY user_id;
-  @@materialized
-  @@index([user_id])
-}
-
-view margin_reports {
-  influencer_id    String?
-  rtp_real         Decimal
-  margin           Decimal
-  period           DateTime
-  // SELECT i.user_id AS influencer_id, (SUM(s.points_awarded) / SUM(t.amount_paid) * 100) AS rtp_real, ... FROM spins s JOIN codes c ON s.code_id = c.id JOIN transactions t ON c.transaction_id = t.id JOIN packages p ON t.package_id = p.id JOIN influencers i ON p.influencer_id = i.user_id GROUP BY i.user_id, DATE_TRUNC('day', s.timestamp);
-  @@materialized
-  @@index([influencer_id, period])
-}
-
-view horario_analytics {
-  hour             Int
-  spin_count       Int
-  avg_points       Decimal
-  // SELECT EXTRACT(HOUR FROM timestamp) AS hour, COUNT(*) AS spin_count, AVG(points_awarded) AS avg_points FROM spins GROUP BY hour;
-  @@materialized
-  @@index([hour])
-}
-
-// Políticas RLS (Row-Level Security) para segurança multi-tenant.
-ALTER TABLE packages ENABLE ROW LEVEL SECURITY;
-CREATE POLICY influencer_packages ON packages FOR ALL USING (influencer_id = current_user_id()) WITH CHECK (influencer_id = current_user_id()); // Assume function current_user_id() from session.
-
-// Triggers para Auditoria (exemplo para spins; similar para outras tabelas sensíveis).
-CREATE OR REPLACE FUNCTION log_audit() RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO audit_logs (action_type, user_id, details, timestamp)
-  VALUES (TG_RELNAME || '_' || TG_OP, NEW.user_id, row_to_json(NEW), NOW());
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER audit_trigger AFTER INSERT OR UPDATE ON spins FOR EACH ROW EXECUTE FUNCTION log_audit();
-CREATE TRIGGER audit_trigger AFTER INSERT OR UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION log_audit();
-CREATE TRIGGER audit_trigger AFTER UPDATE ON packages FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_audit();
-CREATE TRIGGER audit_trigger AFTER INSERT OR UPDATE ON redeems FOR EACH ROW EXECUTE FUNCTION log_audit();
-
-// Funções Auxiliares (ex.: para validação de probs em JSONB).
-CREATE OR REPLACE FUNCTION check_probs_sum(probs jsonb) RETURNS boolean AS $$
-SELECT COALESCE(SUM(value::numeric), 0) = 100 FROM jsonb_array_elements(probs);
-$$ LANGUAGE sql IMMUTABLE STRICT;

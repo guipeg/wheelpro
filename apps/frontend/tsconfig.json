@@ -1,0 +1,32 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["../../packages/core/src/*"],
+      "@components/*": ["./components/*"],
+      "@hooks/*": ["./hooks/*"],
+      "@stores/*": ["./stores/*"],
+      "@services/*": ["./services/*"],
+      "@themes/*": ["./themes/*"],
+      "@i18n/*": ["./i18n/*"],
+      "@tests/*": ["./tests/*"]
+    },
+    "jsx": "preserve",
+    "types": ["vitest/globals", "node"],
+    "noEmit": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.d.ts"
+  ],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,27 @@
+# Node.js
+node_modules/
+dist/
+.next/
+out/
+*.log
+npm-debug.log*
+
+# Logs
+logs/
+*.log
+yarn-debug.log*
+yarn-error.log*
+
+# VS Code
+.vscode/
+
+# Env
+.env
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
